@@ -2,18 +2,16 @@ package main
 
 import (
 	"fmt"
-	//"net"
+	"net"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 )
 
 type Customize struct {
-	httpClient_  *http.Client
-	httpRequest_ *http.Request
-	username_    string
-	passwd_      string
+	httpClient_ *http.Client
+	username_   string
+	passwd_     string
 }
 
 func doInit() *Customize {
@@ -24,13 +22,6 @@ func doInit() *Customize {
 	u.httpClient_ = &http.Client{
 		Timeout: timeout,
 	}
-	var err error
-	u.httpRequest_, err = http.NewRequest("PUT", "http://v0.api.upyun.com", strings.NewReader("test"))
-	if err != nil {
-		fmt.Printf("create http request fail, err: %s\n", err)
-		return nil
-	}
-	u.httpRequest_.SetBasicAuth(u.username_, u.passwd_)
 	return u
 }
 
@@ -38,10 +29,11 @@ func doInit() *Customize {
 func (u *Customize) doPut(suburi string) {
 
 	realurl := "http://v0.api.upyun.com/test4cache/test/" + suburi + ".dat"
-	u.httpRequest_.URL, _ = url.ParseRequestURI(realurl)
 
-	u.httpRequest_.Header.Add("Content-Length", "4")
-	resp, err := u.httpClient_.Do(u.httpRequest_)
+	request, _ := http.NewRequest("PUT", realurl, strings.NewReader("test"))
+	request.SetBasicAuth(u.username_, u.passwd_)
+
+	resp, err := u.httpClient_.Do(request)
 
 	if err != nil {
 		fmt.Println("response fail, err: %v\n", err)
@@ -59,69 +51,120 @@ func (u *Customize) doPut(suburi string) {
 
 func (u *Customize) doCache(suburi string, ipaddr string) {
 
-	realurl := "http://124.115.20.67/test/" + suburi + ".dat"
+	realurl := "http://test4cache.b0.upaiyun.com/test/" + suburi + ".dat"
 	//fmt.Println(realurl)
 	request, err := http.NewRequest("GET", realurl, nil)
-	request.Header.Add("Host", "test4cache.b0.upaiyun.com")
+	trans := &http.Transport{
+		Dial: func(netw, addr string) (net.Conn, error) {
+			conn, err := net.Dial(netw, ipaddr+":80")
+			return conn, err
+		},
+	}
 
+	u.httpClient_.Transport = trans
 	resp, err := u.httpClient_.Do(request)
 	if err != nil {
-		fmt.Printf("response docache fail, err: %s\n", err)
+		fmt.Printf("response docache %s:%s fail, err: %s\n", ipaddr, suburi, err)
 		return
 	}
 
 	defer resp.Body.Close()
 
 	if resp.StatusCode/100 != 2 {
-		fmt.Printf("docache %s fail, %v\n", suburi, resp.StatusCode)
+		fmt.Printf("docache %s:%s fail, %v\n", ipaddr, suburi, resp.StatusCode)
 	} else {
-		fmt.Printf("docache %s success\n", suburi)
+		fmt.Printf("docache %s:%s success\n", ipaddr, suburi)
 	}
 }
 
 func (u *Customize) testCache(suburi string, ipaddr string) {
 
-	realurl := "http://v0.api.upyun.com/test4cache/test/" + suburi + ".dat"
-	request, _ := http.NewRequest("DELETE", realurl, nil)
-	request.SetBasicAuth(u.username_, u.passwd_)
+	realurl := "http://test4cache.b0.upaiyun.com/test/" + suburi + ".dat"
+	//fmt.Println(realurl)
+	request, err := http.NewRequest("GET", realurl, nil)
+	trans := &http.Transport{
+		Dial: func(netw, addr string) (net.Conn, error) {
+			conn, err := net.Dial(netw, ipaddr+":80")
+			return conn, err
+		},
+	}
+
+	u.httpClient_.Transport = trans
 	resp, err := u.httpClient_.Do(request)
-
 	if err != nil {
-		fmt.Printf("response delete fail, err: %s\n", err)
-		return
-	}
-
-	if resp.StatusCode/100 != 2 {
-		fmt.Printf("delete %s fail, %v\n", suburi, resp.StatusCode)
-	} else {
-		fmt.Printf("delete %s success\n", suburi)
-	}
-
-	realurl = "http://test4cache.b0.upaiyun.com/test/" + suburi + ".dat"
-	request, _ = http.NewRequest("GET", realurl, nil)
-	request.Header.Add("Host", "test4cache.b0.upaiyun.com")
-
-	resp, err = u.httpClient_.Do(request)
-	if err != nil {
-		fmt.Printf("response testcache fail, err: %s\n", err)
+		fmt.Printf("response docache %s:%s fail, err: %s\n", ipaddr, suburi, err)
 		return
 	}
 
 	defer resp.Body.Close()
 
 	if resp.StatusCode/100 != 2 {
-		fmt.Printf("testcache %s fail, %v\n", suburi, resp.StatusCode)
+		fmt.Printf("testcache %s:%s fail, %v\n", ipaddr, suburi, resp.StatusCode)
 	} else {
-		fmt.Printf("testcache %s success\n", suburi)
+		fmt.Printf("testcache %s:%s success\n", ipaddr, suburi)
+	}
+}
+
+var u = doInit()
+var loc, _ = time.LoadLocation("Asia/Shanghai")
+var iplist = map[string]string{
+
+	"CTN-SN-SIA-067": "124.115.20.67",
+	"CTN-SN-SIA-068": "124.115.20.68",
+}
+
+func uploadTimer() {
+	datestr := time.Now().Format("2006-01-02")
+	if u != nil {
+		u.doPut(datestr)
+		for _, ip := range iplist {
+			go u.doCache(datestr, ip)
+		}
+	}
+}
+
+func testTimer() {
+	var datestr string
+	for _, ip := range iplist {
+		for i := 0; i < 7; i++ {
+			datestr = time.Now().AddDate(0, 0, i*(-1)).Format("2006-01-02")
+			if u != nil {
+				go u.testCache(datestr, ip)
+			}
+		}
+	}
+}
+
+func timerUpload() {
+	nextdate := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	nexttime, _ := time.ParseInLocation("2006-01-02", nextdate, loc)
+	timer1 := time.NewTicker(nexttime.Sub(time.Now()))
+	//timer1 := time.NewTicker(5 * time.Second)
+	for {
+		select {
+		case <-timer1.C:
+			uploadTimer()
+			timer1 = time.NewTicker(24 * 3600 * time.Second)
+		}
+	}
+
+}
+
+func timerTest() {
+	nextdate := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	nexttime, _ := time.ParseInLocation("2006-01-02", nextdate, loc)
+	timer2 := time.NewTicker(nexttime.Sub(time.Now()) + 23*3600*time.Second)
+	//timer2 := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-timer2.C:
+			testTimer()
+			timer2 = time.NewTicker(24 * 3600 * time.Second)
+		}
 	}
 }
 
 func main() {
-	u := doInit()
-
-	if u != nil {
-		u.doPut("2014-12-16")
-		u.doCache("2014-12-16", "124.115.20.67")
-		u.testCache("2014-12-16", "124.115.20.67")
-	}
+	go timerUpload()
+	timerTest()
 }
