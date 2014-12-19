@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -107,11 +109,7 @@ func (u *Customize) testCache(suburi string, ipaddr string) {
 
 var u = doInit()
 var loc, _ = time.LoadLocation("Asia/Shanghai")
-var iplist = map[string]string{
-
-	"CTN-SN-SIA-067": "124.115.20.67",
-	"CTN-SN-SIA-068": "124.115.20.68",
-}
+var iplist = map[string]string{}
 
 func uploadTimer() {
 	datestr := time.Now().Format("2006-01-02")
@@ -164,7 +162,37 @@ func timerTest() {
 	}
 }
 
+func generateIplist(filename string) {
+	f, err := os.Open(filename)
+	defer f.Close()
+
+	if nil == err {
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line != "" && line[0] != '#' {
+				str_map := strings.Split(line, " ")
+				if str_map != nil && len(str_map) == 2 {
+					key := str_map[0]
+					v_map := strings.Split(str_map[1], "=")
+					if v_map != nil && len(v_map) == 2 {
+						value := v_map[1]
+						//fmt.Printf("key: %s, value: %s", key, value)
+						iplist[key] = value
+					}
+				}
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			fmt.Printf("reading from %s, error: %s", filename, err)
+		}
+
+	}
+}
+
 func main() {
+	generateIplist("iplist.txt")
 	go timerUpload()
 	timerTest()
 }
